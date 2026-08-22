@@ -13,6 +13,7 @@ import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -43,6 +44,7 @@ import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
@@ -199,6 +201,7 @@ class MainActivity : AppCompatActivity() {
         binding.castableOnlySwitch.setOnCheckedChangeListener { _, checked ->
             viewModel.setCastableOnly(checked)
         }
+        binding.historyClearButton.setOnClickListener { confirmClearHistory() }
         binding.playbackSettingsToggle.setOnClickListener {
             setPlaybackSettingsOpen(!binding.playbackSettingsPanel.isVisible, animate = true)
         }
@@ -668,8 +671,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindRecents(state: UiState) {
         val items = state.recents
-        val signature = items.joinToString { it.statusId + it.updatedAt }
+        val signature = items.joinToString { "${it.statusId}:${it.updatedAt}:${it.pinned}" }
         binding.historyEmpty.isVisible = items.isEmpty()
+        binding.historyClearButton.isVisible = items.any { !it.pinned }
         if (signature == lastRecentsSignature) return
         lastRecentsSignature = signature
         binding.recentsList.removeAllViews()
@@ -678,19 +682,51 @@ class MainActivity : AppCompatActivity() {
             val row = inflater.inflate(R.layout.item_recent, binding.recentsList, false)
             row.findViewById<TextView>(R.id.recentTitle).text = item.title
             val dur = item.durationMs?.let { formatPosition(it) }
-            row.findViewById<TextView>(R.id.recentMeta).text = listOfNotNull(item.subtitle, dur).joinToString(" · ")
+            val meta = buildList {
+                if (item.pinned) add(getString(R.string.pinned_label))
+                item.subtitle.takeIf { it.isNotBlank() }?.let { add(it) }
+                if (dur != null) add(dur)
+            }.joinToString(" · ")
+            row.findViewById<TextView>(R.id.recentMeta).text = meta
             val thumb = row.findViewById<ImageView>(R.id.recentThumb)
             item.thumbnailUrl?.takeIf { SafeUrls.isAllowedHttps(it) }?.let { thumb.load(it) }
+            val pin = row.findViewById<ImageButton>(R.id.recentPin)
+            pin.setImageResource(if (item.pinned) R.drawable.ic_pin_filled else R.drawable.ic_pin)
+            pin.contentDescription = getString(
+                if (item.pinned) R.string.unpin_history else R.string.pin_history,
+            )
+            pin.setOnClickListener { viewModel.togglePin(item.statusId) }
+            row.findViewById<ImageButton>(R.id.recentDelete).setOnClickListener {
+                confirmRemoveHistory(item)
+            }
             row.setOnClickListener {
                 viewModel.openRecent(item)
                 binding.bottomNav.selectedItemId = R.id.tab_cast
             }
-            row.setOnLongClickListener {
-                viewModel.removeRecent(item.statusId)
-                true
-            }
             binding.recentsList.addView(row)
         }
+    }
+
+    private fun confirmRemoveHistory(item: RecentItem) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.remove_history_title)
+            .setMessage(item.title)
+            .setPositiveButton(R.string.delete_history_item) { _, _ ->
+                viewModel.removeRecent(item.statusId)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun confirmClearHistory() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.clear_history_title)
+            .setMessage(R.string.clear_history_message)
+            .setPositiveButton(R.string.clear_history) { _, _ ->
+                viewModel.clearUnpinnedRecents()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun openInX() {

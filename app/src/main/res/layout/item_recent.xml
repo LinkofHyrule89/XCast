@@ -15,7 +15,7 @@
         android:layout_height="54dp"
         android:contentDescription="@string/video_thumb"
         android:scaleType="centerCrop"
-        app:shapeAppearanceOverlay="@style/Shape.XCast.ExtraLarge" />
+        app:shapeAppearanceOverlay="@style/Shape.XCast.Small" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -40,4 +40,20 @@
             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
             android:textColor="?attr/colorOnSurfaceVariant" />
     </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/recentPin"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/pin_history"
+        android:src="@drawable/ic_pin" />
+
+    <ImageButton
+        android:id="@+id/recentDelete"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/delete_history_item"
+        android:src="@drawable/ic_delete" />
 </LinearLayout>

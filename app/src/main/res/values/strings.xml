@@ -48,4 +48,12 @@
     <string name="history_empty">Cast a video and it will show up here.</string>
     <string name="remote_empty">Connect to a TV to use volume, speed, and skip.</string>
     <string name="now_playing">Now playing</string>
+    <string name="pin_history">Pin</string>
+    <string name="unpin_history">Unpin</string>
+    <string name="delete_history_item">Remove from history</string>
+    <string name="clear_history">Clear</string>
+    <string name="clear_history_title">Clear history?</string>
+    <string name="clear_history_message">Unpinned videos will be removed. Pinned videos stay.</string>
+    <string name="remove_history_title">Remove this video?</string>
+    <string name="pinned_label">Pinned</string>
 </resources>

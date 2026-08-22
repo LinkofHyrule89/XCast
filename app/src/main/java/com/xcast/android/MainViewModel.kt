@@ -202,6 +202,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(recents = store.recents()) }
     }
 
+    fun togglePin(statusId: String) {
+        store.togglePin(statusId)
+        _uiState.update { it.copy(recents = store.recents()) }
+    }
+
+    fun clearUnpinnedRecents() {
+        store.clearUnpinned()
+        _uiState.update { it.copy(recents = store.recents()) }
+    }
+
     fun saveResume(positionMs: Long, durationMs: Long) {
         val id = _uiState.value.video?.statusId ?: return
         store.saveResume(id, positionMs, durationMs)

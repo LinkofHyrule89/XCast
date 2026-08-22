@@ -90,4 +90,6 @@ XCast does not require an X account or API token. Lookups go to third-party publ
 
 ## License
 
-MIT. X, Twitter, Chromecast, and Google Cast are trademarks of their owners. This project is not affiliated with X Corp or Google.
+MIT.
+
+**Disclaimer:** XCast is fully unofficial. It is not affiliated with, endorsed by, sponsored by, or associated with X Corp, Twitter, Google, or any related companies. “X”, “Twitter”, “Chromecast”, and “Google Cast” are trademarks of their respective owners. Use at your own risk.
