@@ -2,6 +2,15 @@
 
 All notable changes to XCast are documented here.
 
+## [1.2.1] — 2026-08-22
+
+History management and an explicit unofficial disclaimer.
+
+- Pin videos on the History tab so they stay at the top and survive **Clear**.
+- Delete a single history item, or clear all unpinned items.
+- README states that XCast is fully unofficial and not associated with X Corp.
+- App screenshots and a 1280×640 social preview image on GitHub.
+
 ## [1.2.0] — 2026-08-22
 
 Reliable TV playback and a YouTube Music-style bottom player.
@@ -29,6 +38,7 @@ Volume, mute, speed, and chapter skip on the TV remote. Recents and last-positio
 
 Initial release. Share an X video post to Chromecast with Cast-safe stream picking, captions, chapters, and in-app play/pause/scrub.
 
+[1.2.1]: https://github.com/LinkofHyrule89/XCast/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/LinkofHyrule89/XCast/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LinkofHyrule89/XCast/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/LinkofHyrule89/XCast/releases/tag/v1.0.0
