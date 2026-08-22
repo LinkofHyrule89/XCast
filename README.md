@@ -1,10 +1,22 @@
 # XCast
 
+<p align="center">
+  <img src="docs/social-preview.png" alt="XCast — Cast X videos to your TV" width="640">
+</p>
+
 Android app that casts videos from [X](https://x.com) (Twitter) posts to a Chromecast or Cast-enabled TV using the [Google Cast SDK](https://developers.google.com/cast).
 
 Share a video post from the X app, pick a Cast-safe resolution, and play it on the big screen. XCast is the remote: play/pause, scrub, captions, and chapters.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/cast.png" alt="Cast tab" width="240">
+  <img src="docs/screenshots/history.png" alt="History tab" width="240">
+  <img src="docs/screenshots/tv.png" alt="TV tab" width="240">
+</p>
 
 ## Features
 
