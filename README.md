@@ -8,6 +8,8 @@ Android app that casts videos from [X](https://x.com) (Twitter) posts to a Chrom
 
 Share a video post from the X app, pick a Cast-safe resolution, and play it on the big screen. XCast is the remote: play/pause, scrub, captions, and chapters.
 
+> **Unofficial.** XCast is an independent hobby project. It is **not** affiliated with, endorsed by, sponsored by, or associated with X Corp, Twitter, or any of their products. X, Twitter, Chromecast, and Google Cast are trademarks of their owners.
+
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Screenshots
