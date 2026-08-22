@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.XCast" parent="Theme.Material3.DynamicColors.Dark.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="mediaRouteTheme">@style/Theme.XCast.MediaRouter</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/Shape.XCast.ExtraLarge</item>
+        <item name="materialCardViewStyle">@style/Widget.XCast.Card</item>
+    </style>
+
+    <style name="Shape.XCast.ExtraLarge" parent="ShapeAppearance.Material3.Corner.ExtraLarge">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">28dp</item>
+    </style>
+
+    <style name="Widget.XCast.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardElevation">0dp</item>
+        <item name="cardCornerRadius">28dp</item>
+        <item name="strokeWidth">0dp</item>
+    </style>
+
+    <style name="Theme.XCast.MediaRouter" parent="Theme.MediaRouter.Light">
+        <item name="mediaRouteButtonTint">?attr/colorOnSurface</item>
+    </style>
+
+    <style name="Theme.XCast.ExpandedController" parent="Theme.Material3.DynamicColors.Dark.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="castExpandedControllerStyle">@style/CustomCastExpandedController</item>
+    </style>
+
+    <style name="CustomCastExpandedController" parent="CastExpandedController" />
+</resources>

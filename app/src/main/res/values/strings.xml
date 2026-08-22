@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">XCast</string>
+    <!-- Default Media Receiver application ID from Google Cast -->
+    <string name="cast_app_id">CC1AD845</string>
+    <string name="media_route_menu_title">Cast</string>
+    <string name="howto_title">Cast an X video to your TV</string>
+    <string name="howto_body">In the X app, open a post with a video, tap Share, and choose XCast. Or paste the post URL below. Then tap the Cast icon and pick your Chromecast or Cast-enabled TV.</string>
+    <string name="url_hint">https://x.com/user/status/…</string>
+    <string name="find_video">Find video</string>
+    <string name="cast_to_tv">Cast to TV</string>
+    <string name="connect_then_cast">Connect to a TV, then cast</string>
+    <string name="connect_cast_first">Connect to a Cast device first — tap the Cast icon.</string>
+    <string name="castable_only">Show only Cast-safe resolutions</string>
+    <string name="video_track">Video / resolution</string>
+    <string name="audio_track">Audio track</string>
+    <string name="captions_track">Captions / subtitles</string>
+    <string name="remote_title">TV remote</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="skip_back">−10s</string>
+    <string name="skip_forward">+10s</string>
+    <string name="stop_cast">Stop</string>
+    <string name="chapters_title">Chapters</string>
+</resources>

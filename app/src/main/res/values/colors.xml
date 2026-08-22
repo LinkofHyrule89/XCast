@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#FF0B0F14</color>
+    <color name="surface">#FF151B23</color>
+    <color name="on_surface">#FFF4F6F8</color>
+    <color name="on_surface_variant">#FFB7C0CA</color>
+    <color name="primary">#FF1D9BF0</color>
+    <color name="on_primary">#FFFFFFFF</color>
+    <color name="launcher_bg">#FF0B0F14</color>
+</resources>
