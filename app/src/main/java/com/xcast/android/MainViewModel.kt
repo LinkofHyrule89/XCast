@@ -1,11 +1,21 @@
 package com.xcast.android
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+enum class LookupError {
+    NONE,
+    EMPTY,
+    NO_ID,
+    NO_VIDEO,
+    LOOKUP_FAILED,
+    REJECTED,
+}
 
 data class UiState(
     val loading: Boolean = false,
@@ -15,11 +25,21 @@ data class UiState(
     val selectedAudioId: String? = null,
     val selectedCaptionId: String? = null,
     val castableOnly: Boolean = true,
+    val recents: List<RecentItem> = emptyList(),
+    val error: LookupError = LookupError.NONE,
+    val resumeAtMs: Long = 0L,
+    val lastUrl: String = "",
 )
 
-class MainViewModel : ViewModel() {
+class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val resolver = TweetVideoResolver()
-    private val _uiState = MutableStateFlow(UiState())
+    private val store = PrefsStore(application)
+    private val _uiState = MutableStateFlow(
+        UiState(
+            recents = store.recents(),
+            castableOnly = store.castableOnly,
+        ),
+    )
     val uiState: StateFlow<UiState> = _uiState
 
     private var pendingCast = false
@@ -27,14 +47,36 @@ class MainViewModel : ViewModel() {
     fun resolve(raw: String) {
         val text = raw.trim()
         if (text.isEmpty()) {
-            _uiState.value = UiState(message = "Paste an X post URL first.")
+            _uiState.update {
+                it.copy(
+                    loading = false,
+                    video = null,
+                    error = LookupError.EMPTY,
+                    message = "Paste an X post URL first.",
+                )
+            }
+            return
+        }
+        if (TweetParser.extractStatusId(text) == null) {
+            _uiState.update {
+                it.copy(
+                    loading = false,
+                    video = null,
+                    error = LookupError.NO_ID,
+                    message = "No X/Twitter post URL found.",
+                )
+            }
             return
         }
         viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, message = "Looking up video…", video = null) }
+            _uiState.update {
+                it.copy(loading = true, message = "Looking up video…", video = null, error = LookupError.NONE, lastUrl = text)
+            }
             try {
                 val video = resolver.resolve(text)
                 val defaultVideo = defaultVideoTrack(video)
+                store.upsertRecent(video)
+                val resume = store.resumePosition(video.statusId) ?: 0L
                 _uiState.value = UiState(
                     loading = false,
                     message = "Pick a Castable resolution, then tap Cast to TV.",
@@ -42,17 +84,39 @@ class MainViewModel : ViewModel() {
                     selectedVideoId = defaultVideo?.id,
                     selectedAudioId = TweetVideoResolver.AUDIO_MUXED,
                     selectedCaptionId = defaultCaptionId(video),
-                    castableOnly = true,
+                    castableOnly = store.castableOnly,
+                    recents = store.recents(),
+                    error = LookupError.NONE,
+                    resumeAtMs = resume,
+                    lastUrl = text,
                 )
             } catch (e: Exception) {
                 pendingCast = false
-                _uiState.value = UiState(
-                    loading = false,
-                    message = e.message ?: "Failed to resolve video.",
-                    video = null,
-                )
+                val msg = e.message.orEmpty()
+                val err = when {
+                    msg.contains("no video", true) || msg.contains("no media", true) -> LookupError.NO_VIDEO
+                    else -> LookupError.LOOKUP_FAILED
+                }
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        message = e.message ?: "Failed to resolve video.",
+                        video = null,
+                        error = err,
+                        recents = store.recents(),
+                    )
+                }
             }
         }
+    }
+
+    fun retryLookup() {
+        val url = _uiState.value.lastUrl
+        if (url.isNotBlank()) resolve(url)
+    }
+
+    fun markRejected(message: String) {
+        _uiState.update { it.copy(error = LookupError.REJECTED, message = message) }
     }
 
     fun selectVideo(id: String) {
@@ -62,6 +126,12 @@ class MainViewModel : ViewModel() {
                 state.video?.audioTracks?.lastOrNull { !it.muxed }?.id ?: state.selectedAudioId
             } else {
                 TweetVideoResolver.AUDIO_MUXED
+            }
+            if (track != null) {
+                store.lastHeightBand = when {
+                    track.id == TweetVideoResolver.VIDEO_HLS -> 0
+                    else -> track.height
+                }
             }
             state.copy(selectedVideoId = id, selectedAudioId = audioId)
         }
@@ -84,6 +154,7 @@ class MainViewModel : ViewModel() {
     }
 
     fun setCastableOnly(enabled: Boolean) {
+        store.castableOnly = enabled
         _uiState.update { state ->
             val next = state.copy(castableOnly = enabled)
             val visible = next.video?.videoTracks.orEmpty().filter {
@@ -117,6 +188,37 @@ class MainViewModel : ViewModel() {
         return all.filter { it.fit != CastFit.UNSUPPORTED }
     }
 
+    fun openRecent(item: RecentItem) {
+        resolve("https://x.com/i/status/${item.statusId}")
+    }
+
+    fun removeRecent(statusId: String) {
+        store.removeRecent(statusId)
+        _uiState.update { it.copy(recents = store.recents()) }
+    }
+
+    fun saveResume(positionMs: Long, durationMs: Long) {
+        val id = _uiState.value.video?.statusId ?: return
+        store.saveResume(id, positionMs, durationMs)
+        val video = _uiState.value.video ?: return
+        store.upsertRecent(video, positionMs)
+        _uiState.update { it.copy(recents = store.recents()) }
+    }
+
+    fun consumeResume(): Long {
+        val id = _uiState.value.video?.statusId
+        val stored = id?.let { store.resumePosition(it) } ?: 0L
+        val pos = maxOf(_uiState.value.resumeAtMs, stored)
+        _uiState.update { it.copy(resumeAtMs = 0L) }
+        return pos
+    }
+
+    fun clearResumeAndRestart() {
+        val id = _uiState.value.video?.statusId ?: return
+        store.clearResume(id)
+        _uiState.update { it.copy(resumeAtMs = 0L) }
+    }
+
     fun markPendingCast() {
         pendingCast = true
     }
@@ -128,11 +230,21 @@ class MainViewModel : ViewModel() {
     }
 
     private fun defaultVideoTrack(video: TweetVideo): VideoTrackOption? {
-        val mp4 = video.videoTracks.filter { it.contentType.contains("mp4") }
+        val preferred = store.lastHeightBand
+        val visible = if (store.castableOnly) {
+            video.videoTracks.filter { it.fit != CastFit.UNSUPPORTED }
+        } else {
+            video.videoTracks
+        }
+        if (preferred == 0) {
+            visible.firstOrNull { it.id == TweetVideoResolver.VIDEO_HLS }?.let { return it }
+        }
+        visible.filter { it.contentType.contains("mp4") && it.height == preferred }.maxByOrNull { it.bitrate }?.let { return it }
+        val mp4 = visible.filter { it.contentType.contains("mp4") }
         return mp4.filter { it.fit == CastFit.SAFE }.maxByOrNull { it.height }
             ?: mp4.filter { it.fit != CastFit.UNSUPPORTED }.maxByOrNull { it.height }
             ?: mp4.maxByOrNull { it.height }
-            ?: video.videoTracks.firstOrNull()
+            ?: visible.firstOrNull()
     }
 
     private fun defaultCaptionId(video: TweetVideo): String {

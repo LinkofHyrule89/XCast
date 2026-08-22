@@ -24,6 +24,7 @@ object CastController {
         videoTrack: VideoTrackOption,
         audioTrack: AudioTrackOption?,
         captionTrack: CaptionTrackOption?,
+        startPositionMs: Long = 0L,
         onSuccess: () -> Unit,
         onFailure: (String) -> Unit,
     ) {
@@ -78,6 +79,8 @@ object CastController {
             MediaLoadRequestData.Builder()
                 .setMediaInfo(mediaInfo)
                 .setAutoplay(true)
+                .setPlaybackRate(1.0)
+                .setCurrentTime(startPositionMs.coerceAtLeast(0L))
                 .apply {
                     if (activeIds.isNotEmpty()) {
                         setActiveTrackIds(activeIds)
@@ -205,5 +208,32 @@ object CastController {
     fun isPlaying(client: RemoteMediaClient): Boolean {
         val state = client.playerState
         return state == MediaStatus.PLAYER_STATE_PLAYING || state == MediaStatus.PLAYER_STATE_BUFFERING
+    }
+
+    fun setVolume(session: CastSession, volume: Double) {
+        session.volume = volume.coerceIn(0.0, 1.0)
+    }
+
+    fun setMuted(session: CastSession, muted: Boolean) {
+        session.isMute = muted
+    }
+
+    fun setSpeed(client: RemoteMediaClient, rate: Double) {
+        client.setPlaybackRate(rate)
+    }
+
+    fun prevChapterPosition(chapters: List<VideoChapter>, positionMs: Long): Long {
+        if (chapters.isEmpty()) return 0L
+        val current = chapters.lastOrNull { it.positionMs <= positionMs } ?: chapters.first()
+        val into = positionMs - current.positionMs
+        if (into > 2_000L) return current.positionMs
+        val idx = chapters.indexOf(current)
+        return if (idx > 0) chapters[idx - 1].positionMs else 0L
+    }
+
+    fun nextChapterPosition(chapters: List<VideoChapter>, positionMs: Long, durationMs: Long): Long {
+        if (chapters.isEmpty()) return durationMs
+        val next = chapters.firstOrNull { it.positionMs > positionMs + 500 }
+        return next?.positionMs ?: durationMs.coerceAtLeast(positionMs)
     }
 }

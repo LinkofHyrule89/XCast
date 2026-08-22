@@ -11,8 +11,10 @@ Share a video post from the X app, pick a Cast-safe resolution, and play it on t
 - **Cast-safe resolution picker** so Chromecast is not sent 3K / 25 Mbps files
 - Audio track and **closed captions / WebVTT** when X publishes them
 - **Chapters** from timestamp lines in the post (`0:00 Intro`)
-- In-app **TV remote**: play, pause, ±10s, scrubber, stop
-- Material You dynamic color, Cast mini controller, notifications
+- In-app **TV remote**: play, pause, ±10s, scrubber, stop, **volume, mute, speed**, chapter skip
+- **Resume** from last position, **recents** (tap to re-open a post)
+- Thumbnail, duration, **Open in X**, on-phone **MP4 preview** before Cast
+- Material You dynamic color, Cast intro overlay, keep-screen-on while casting
 
 ## Install
 

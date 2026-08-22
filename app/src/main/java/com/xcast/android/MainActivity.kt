@@ -1,13 +1,16 @@
 package com.xcast.android
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.graphics.Typeface
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
+import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -21,13 +24,19 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import coil.load
 import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastState
+import com.google.android.gms.cast.framework.IntroductoryOverlay
 import com.google.android.gms.cast.MediaTrack
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.android.material.color.MaterialColors
+import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
 import androidx.mediarouter.app.MediaRouteActionProvider
 import com.xcast.android.databinding.ActivityMainBinding
@@ -40,10 +49,20 @@ class MainActivity : AppCompatActivity() {
     private var mediaRouteMenuItem: MenuItem? = null
     private var userSeeking = false
     private var lastChapterSignature: String? = null
+    private var lastRecentsSignature: String? = null
+    private var lastResumeSavedAt = 0L
+    private var introOverlay: IntroductoryOverlay? = null
+    private var localPlayer: ExoPlayer? = null
+    private val speeds = listOf(0.75 to "0.75×", 1.0 to "1×", 1.25 to "1.25×", 1.5 to "1.5×", 2.0 to "2×")
 
     private val progressListener = RemoteMediaClient.ProgressListener { position, duration ->
         if (!userSeeking) updateSeekUi(position, duration)
         updatePlayPauseLabel()
+        val now = System.currentTimeMillis()
+        if (now - lastResumeSavedAt > 5_000L) {
+            lastResumeSavedAt = now
+            viewModel.saveResume(position, duration)
+        }
     }
 
     private val mediaCallback = object : RemoteMediaClient.Callback() {
@@ -63,7 +82,9 @@ class MainActivity : AppCompatActivity() {
         }
         override fun onSessionEnded(session: CastSession, error: Int) {
             binding.remoteCard.isVisible = false
+            setKeepAwake(false)
             render(viewModel.uiState.value)
+            maybeStartLocalPreview()
         }
         override fun onSessionStartFailed(session: CastSession, error: Int) {
             Toast.makeText(this@MainActivity, "Could not start Cast session ($error)", Toast.LENGTH_LONG).show()
@@ -110,6 +131,29 @@ class MainActivity : AppCompatActivity() {
         binding.stopButton.setOnClickListener {
             currentClient()?.stop()
         }
+        binding.retryButton.setOnClickListener { viewModel.retryLookup() }
+        binding.openInXButton.setOnClickListener { openInX() }
+        binding.muteButton.setOnClickListener {
+            val session = currentSession() ?: return@setOnClickListener
+            CastController.setMuted(session, !session.isMute)
+            updateVolumeUi()
+        }
+        binding.volumeSlider.addOnChangeListener { _, value, fromUser ->
+            if (!fromUser) return@addOnChangeListener
+            currentSession()?.let { CastController.setVolume(it, value / 100.0) }
+        }
+        binding.prevChapterButton.setOnClickListener {
+            val client = currentClient() ?: return@setOnClickListener
+            val chapters = viewModel.uiState.value.video?.chapters.orEmpty()
+            CastController.seekTo(client, CastController.prevChapterPosition(chapters, client.approximateStreamPosition))
+        }
+        binding.nextChapterButton.setOnClickListener {
+            val client = currentClient() ?: return@setOnClickListener
+            val chapters = viewModel.uiState.value.video?.chapters.orEmpty()
+            val dur = client.streamDuration.takeIf { it > 0 } ?: viewModel.uiState.value.video?.durationMs ?: 0L
+            CastController.seekTo(client, CastController.nextChapterPosition(chapters, client.approximateStreamPosition, dur))
+        }
+        setupSpeedDropdown()
         binding.remoteSeek.addOnChangeListener { slider, value, fromUser ->
             if (!fromUser) return@addOnChangeListener
             val client = currentClient() ?: return@addOnChangeListener
@@ -157,6 +201,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        currentClient()?.let { viewModel.saveResume(it.approximateStreamPosition, it.streamDuration) }
         detachRemote()
         castContext?.sessionManager?.removeSessionManagerListener(sessionListener, CastSession::class.java)
         super.onPause()
@@ -166,7 +211,13 @@ class MainActivity : AppCompatActivity() {
         menuInflater.inflate(R.menu.cast, menu)
         CastButtonFactory.setUpMediaRouteButton(applicationContext, menu, R.id.media_route_menu_item)
         mediaRouteMenuItem = menu.findItem(R.id.media_route_menu_item)
+        maybeShowCastOverlay()
         return true
+    }
+
+    override fun onStop() {
+        releaseLocalPlayer()
+        super.onStop()
     }
 
     private fun handleIncoming(intent: Intent?) {
@@ -187,17 +238,34 @@ class MainActivity : AppCompatActivity() {
         binding.progress.isVisible = state.loading
         binding.resolveButton.isEnabled = !state.loading
         binding.statusText.text = state.message
-        binding.castNowButton.isEnabled = state.video != null && currentSession() != null
+        binding.castNowButton.isEnabled = state.video != null
         binding.castNowButton.text = when {
             state.video == null -> getString(R.string.cast_to_tv)
             currentSession() == null -> getString(R.string.connect_then_cast)
             else -> getString(R.string.cast_to_tv)
         }
+        binding.retryButton.isVisible = state.error == LookupError.LOOKUP_FAILED ||
+            state.error == LookupError.REJECTED ||
+            state.error == LookupError.NO_VIDEO
         state.video?.let { video ->
             binding.previewTitle.text = video.title
             binding.previewSubtitle.text = video.subtitle
+            binding.previewDuration.isVisible = video.durationMs != null
+            binding.previewDuration.text = video.durationMs?.let { formatPosition(it) }.orEmpty()
+            val thumb = video.thumbnailUrl?.takeIf { SafeUrls.isAllowedHttps(it) }
+            if (thumb != null) {
+                binding.previewThumb.isVisible = currentSession() == null
+                binding.previewThumb.load(thumb)
+            } else {
+                binding.previewThumb.isVisible = false
+            }
         }
         binding.previewCard.isVisible = state.video != null
+        binding.openInXButton.isVisible = state.video != null
+        binding.chapterSkipRow.isVisible = state.video?.chapters?.isNotEmpty() == true
+        bindRecents(state)
+        maybeStartLocalPreview()
+        setKeepAwake(currentSession() != null)
         if (binding.castableOnlySwitch.isChecked != state.castableOnly) {
             binding.castableOnlySwitch.isChecked = state.castableOnly
         }
@@ -229,17 +297,30 @@ class MainActivity : AppCompatActivity() {
         val session = currentSession() ?: return
         val videoTrack = viewModel.selectedVideo() ?: return
         if (!viewModel.consumePendingCast()) return
+        val start = viewModel.consumeResume().coerceAtLeast(localPlayer?.currentPosition ?: 0L)
+        pauseLocalPlayer()
         CastController.load(
             session,
             video,
             videoTrack,
             viewModel.selectedAudio(),
             viewModel.selectedCaption(),
+            startPositionMs = start,
             onSuccess = {
                 attachRemote()
                 binding.remoteCard.isVisible = true
+                setKeepAwake(true)
+                if (start > 5_000L) {
+                    Snackbar.make(binding.root, R.string.resumed_from, Snackbar.LENGTH_LONG)
+                        .setAction(R.string.restart_from_start) {
+                            currentClient()?.let { CastController.seekTo(it, 0) }
+                            viewModel.clearResumeAndRestart()
+                        }
+                        .show()
+                }
             },
             onFailure = { error ->
+                viewModel.markRejected(error)
                 Toast.makeText(this, error, Toast.LENGTH_LONG).show()
             },
         )
@@ -312,8 +393,13 @@ class MainActivity : AppCompatActivity() {
         val video = viewModel.uiState.value.video ?: return
         val session = currentSession()
         if (session == null) {
-            Toast.makeText(this, R.string.connect_cast_first, Toast.LENGTH_LONG).show()
-            openCastDialog()
+            val state = castContext?.castState
+            if (state == CastState.NO_DEVICES_AVAILABLE) {
+                Snackbar.make(binding.root, R.string.no_cast_devices, Snackbar.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, R.string.connect_cast_first, Toast.LENGTH_LONG).show()
+                openCastDialog()
+            }
             viewModel.markPendingCast()
             return
         }
@@ -330,6 +416,7 @@ class MainActivity : AppCompatActivity() {
         binding.remoteCard.isVisible = true
         updatePlayPauseLabel()
         updateSeekUi(client.approximateStreamPosition, client.streamDuration)
+        updateVolumeUi()
     }
 
     private fun detachRemote() {
@@ -396,5 +483,107 @@ class MainActivity : AppCompatActivity() {
             )
             titleView.setTextColor(color)
         }
+    }
+
+    private fun setupSpeedDropdown() {
+        val labels = speeds.map { it.second }
+        binding.speedDropdown.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, labels))
+        binding.speedDropdown.setText("1×", false)
+        binding.speedDropdown.setOnItemClickListener { _, _, position, _ ->
+            val rate = speeds.getOrNull(position)?.first ?: 1.0
+            currentClient()?.let { CastController.setSpeed(it, rate) }
+        }
+    }
+
+    private fun updateVolumeUi() {
+        val session = currentSession() ?: return
+        binding.muteButton.text = getString(if (session.isMute) R.string.unmute else R.string.mute)
+        binding.volumeSlider.value = (session.volume * 100).toFloat().coerceIn(0f, 100f)
+    }
+
+    private fun bindRecents(state: UiState) {
+        val items = state.recents
+        val signature = items.joinToString { it.statusId + it.updatedAt }
+        binding.recentsHeader.isVisible = items.isNotEmpty()
+        binding.recentsList.isVisible = items.isNotEmpty()
+        if (signature == lastRecentsSignature) return
+        lastRecentsSignature = signature
+        binding.recentsList.removeAllViews()
+        val inflater = LayoutInflater.from(this)
+        items.forEach { item ->
+            val row = inflater.inflate(R.layout.item_recent, binding.recentsList, false)
+            row.findViewById<TextView>(R.id.recentTitle).text = item.title
+            val dur = item.durationMs?.let { formatPosition(it) }
+            row.findViewById<TextView>(R.id.recentMeta).text = listOfNotNull(item.subtitle, dur).joinToString(" · ")
+            val thumb = row.findViewById<ImageView>(R.id.recentThumb)
+            item.thumbnailUrl?.takeIf { SafeUrls.isAllowedHttps(it) }?.let { thumb.load(it) }
+            row.setOnClickListener { viewModel.openRecent(item) }
+            row.setOnLongClickListener {
+                viewModel.removeRecent(item.statusId)
+                true
+            }
+            binding.recentsList.addView(row)
+        }
+    }
+
+    private fun openInX() {
+        val id = viewModel.uiState.value.video?.statusId ?: return
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://x.com/i/status/$id")))
+    }
+
+    private fun setKeepAwake(on: Boolean) {
+        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun maybeShowCastOverlay() {
+        val item = mediaRouteMenuItem ?: return
+        val state = castContext?.castState ?: return
+        if (state == CastState.NO_DEVICES_AVAILABLE) return
+        introOverlay?.remove()
+        introOverlay = IntroductoryOverlay.Builder(this, item)
+            .setTitleText(getString(R.string.cast_intro))
+            .setSingleTime()
+            .setOnOverlayDismissedListener { introOverlay = null }
+            .build()
+        introOverlay?.show()
+    }
+
+    private fun maybeStartLocalPreview() {
+        val track = viewModel.selectedVideo()
+        val url = track?.url
+        val canPreview = currentSession() == null &&
+            track != null &&
+            track.muxedAudio &&
+            url != null &&
+            SafeUrls.isAllowedHttps(url) &&
+            url.contains(".mp4")
+        if (!canPreview) {
+            pauseLocalPlayer()
+            binding.localPlayer.isVisible = false
+            return
+        }
+        binding.previewThumb.isVisible = false
+        binding.localPlayer.isVisible = true
+        val player = localPlayer ?: ExoPlayer.Builder(this).build().also {
+            localPlayer = it
+            binding.localPlayer.player = it
+        }
+        val current = player.currentMediaItem?.localConfiguration?.uri?.toString()
+        if (current != url) {
+            player.setMediaItem(MediaItem.fromUri(url!!))
+            player.prepare()
+            player.playWhenReady = false
+        }
+    }
+
+    private fun pauseLocalPlayer() {
+        localPlayer?.pause()
+    }
+
+    private fun releaseLocalPlayer() {
+        binding.localPlayer.player = null
+        localPlayer?.release()
+        localPlayer = null
     }
 }
