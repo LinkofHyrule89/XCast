@@ -30,6 +30,8 @@ object SafeUrls {
             "twitter.com",
             "x.com",
             "video.pscp.tv",
+            "commondatastorage.googleapis.com",
+            "googleusercontent.com",
         )
         return suffixes.any { host == it || host.endsWith(".$it") }
     }

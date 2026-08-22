@@ -9,6 +9,7 @@ class XCastApp : Application() {
     override fun onCreate() {
         super.onCreate()
         DynamicColors.applyToActivitiesIfAvailable(this)
+        CastMediaServer.ensureStarted()
         CastContext.getSharedInstance(this, Executors.newSingleThreadExecutor())
     }
 }

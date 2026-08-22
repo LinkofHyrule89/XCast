@@ -10,12 +10,11 @@ import com.google.android.gms.cast.framework.media.NotificationOptions
 class CastOptionsProvider : OptionsProvider {
     override fun getCastOptions(context: Context): CastOptions {
         val notificationOptions = NotificationOptions.Builder()
-            .setTargetActivityClassName(ExpandedControlsActivity::class.java.name)
+            .setTargetActivityClassName(MainActivity::class.java.name)
             .build()
 
         val mediaOptions = CastMediaOptions.Builder()
             .setNotificationOptions(notificationOptions)
-            .setExpandedControllerActivityClassName(ExpandedControlsActivity::class.java.name)
             .build()
 
         return CastOptions.Builder()

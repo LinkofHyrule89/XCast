@@ -16,6 +16,11 @@
         <item name="cornerSize">28dp</item>
     </style>
 
+    <style name="Shape.XCast.Small" parent="ShapeAppearance.Material3.Corner.Small">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">8dp</item>
+    </style>
+
     <style name="Widget.XCast.Card" parent="Widget.Material3.CardView.Filled">
         <item name="cardElevation">0dp</item>
         <item name="cardCornerRadius">28dp</item>

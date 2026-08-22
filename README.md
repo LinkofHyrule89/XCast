@@ -4,15 +4,20 @@ Android app that casts videos from [X](https://x.com) (Twitter) posts to a Chrom
 
 Share a video post from the X app, pick a Cast-safe resolution, and play it on the big screen. XCast is the remote: play/pause, scrub, captions, and chapters.
 
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## Features
 
 - **Share to XCast** from the X app (`text/plain` share and `x.com` / `twitter.com` links)
 - Resolves a direct H.264 + AAC stream (no X API key)
-- **Cast-safe resolution picker** so Chromecast is not sent 3K / 25 Mbps files
+- **LAN proxy** so Google TV / Sony Bravia can play Twitter MP4s (the TV fetches from the phone, not `video.twimg.com`)
+- Defaults to the highest **Cast-safe** MP4, typically **1080p** when X publishes it
 - Audio track and **closed captions / WebVTT** when X publishes them
 - **Chapters** from timestamp lines in the post (`0:00 Intro`)
-- In-app **TV remote**: play, pause, ±10s, scrubber, stop, **volume, mute, speed**, chapter skip
-- **Resume** from last position, **recents** (tap to re-open a post)
+- Bottom tabs **Cast**, **History**, and **TV**, plus a YouTube Music-style **mini player**
+- Mini player: artwork, play/pause, progress; tap for now-playing (scrubber, ±10s)
+- **TV** tab: volume, mute, speed, skip, stop, chapter skip
+- **Resume** from last position; **History** tab to re-open a post
 - Thumbnail, duration, **Open in X**, on-phone **MP4 preview** before Cast
 - Material You dynamic color, Cast intro overlay, keep-screen-on while casting
 
@@ -27,10 +32,12 @@ Debug builds from CI are signed with the Android **debug** keystore so they side
 ## Use
 
 1. Open a **video** post in X.
-2. Share → **XCast**, or paste `https://x.com/user/status/…` and tap **Find video**.
-3. Choose a **Castable** resolution (720p is the default) and audio.
+2. Share → **XCast**, or paste `https://x.com/user/status/…` and tap the search icon.
+3. XCast picks the sharpest Cast-safe MP4 (often 1080p). Open **Video Playback Settings** to change it.
 4. Tap the Cast icon, pick your TV, then **Cast to TV**.
-5. Control playback from the **TV remote** card.
+5. Control playback from the **mini player** (tap for now-playing) or the **TV** tab.
+
+Phone and TV must be on the same Wi‑Fi. A VPN on the phone is fine as long as LAN is still reachable (do not send the TV a Tailscale `100.x` address).
 
 Private posts, login-walled media, and some HLS-only clips may not resolve.
 
@@ -49,18 +56,19 @@ Or open the folder in Android Studio.
 GitHub Actions builds the APK on every push to `main` and publishes it when you push a tag:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 ## How it works
 
 1. A share/VIEW intent delivers the post URL.
 2. The status ID is sent to FxTwitter / VxTwitter JSON endpoints.
-3. Variants are ranked for Chromecast (prefer muxed 720p MP4).
-4. Google Cast **Default Media Receiver** (`CC1AD845`) plays HTTPS media on the TV.
+3. Variants are ranked for Chromecast (prefer muxed 1080p or 720p MP4).
+4. The phone serves the MP4 to the TV over HTTP/1.1 on the LAN so the receiver does not have to fetch `video.twimg.com` itself.
+5. Google Cast **Default Media Receiver** (`CC1AD845`) plays that local URL.
 
-Lookups and media URLs are restricted to HTTPS hosts on X/Twitter CDNs and the public lookup APIs. Cleartext HTTP is disabled.
+Lookups and media URLs are restricted to HTTPS hosts on X/Twitter CDNs and the public lookup APIs. The TV is served cleartext HTTP only on the LAN, from the phone.
 
 ## Privacy
 

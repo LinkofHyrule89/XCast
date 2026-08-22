@@ -22,7 +22,7 @@ class PrefsStore(context: Context) {
         set(value) { prefs.edit().putBoolean(CASTABLE_ONLY, value).apply() }
 
     var lastHeightBand: Int
-        get() = prefs.getInt(HEIGHT_BAND, 720)
+        get() = prefs.getInt(HEIGHT_BAND, 0)
         set(value) { prefs.edit().putInt(HEIGHT_BAND, value).apply() }
 
     fun recents(): List<RecentItem> {

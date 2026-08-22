@@ -27,7 +27,10 @@
     <string name="playback_speed">Speed</string>
     <string name="prev_chapter">Previous chapter</string>
     <string name="next_chapter">Next chapter</string>
-    <string name="recents_title">Recents</string>
+    <string name="recents_title">History</string>
+    <string name="expand_history">Show history</string>
+    <string name="collapse_history">Hide history</string>
+    <string name="more_playback_controls">Swipe up for volume, speed, and skip</string>
     <string name="open_in_x">Open in X</string>
     <string name="retry">Retry</string>
     <string name="video_thumb">Video thumbnail</string>
@@ -35,4 +38,14 @@
     <string name="resumed_from">Resumed from last position</string>
     <string name="no_cast_devices">No Cast devices found. Use the same Wi‑Fi as the TV and make sure Cast is enabled.</string>
     <string name="cast_intro">Tap to choose a TV</string>
+    <string name="connected_to">Connected to %1$s</string>
+    <string name="video_playback_settings">Video Playback Settings</string>
+    <string name="expand_playback_settings">Show video playback settings</string>
+    <string name="collapse_playback_settings">Hide video playback settings</string>
+    <string name="tab_cast">Cast</string>
+    <string name="tab_history">History</string>
+    <string name="tab_remote">TV</string>
+    <string name="history_empty">Cast a video and it will show up here.</string>
+    <string name="remote_empty">Connect to a TV to use volume, speed, and skip.</string>
+    <string name="now_playing">Now playing</string>
 </resources>

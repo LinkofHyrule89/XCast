@@ -40,19 +40,21 @@ data class CaptionTrackOption(
 
 fun castFit(width: Int, height: Int, bitrate: Int): CastFit {
     if (height <= 0 || width <= 0) {
-        return if (bitrate in 1..8_000_000) CastFit.SAFE else CastFit.RISKY
+        return if (bitrate in 1..16_000_000) CastFit.SAFE else CastFit.RISKY
     }
-    // Default Media Receiver: H.264 up to 1080p is typical; 3K/high-bitrate fails immediately.
+    // LAN proxy + Google TV: 1080p H.264 is reliable. Twitter's 1080p
+    // encodes are often ~2008x1080 at ~10 Mbps. ~3K/25 Mbps can play on
+    // a Bravia but may buffer through a VPN, so keep it as a fallback pick.
     return when {
-        height <= 720 && width <= 1920 && bitrate <= 8_000_000 -> CastFit.SAFE
-        height <= 1080 && width <= 2048 && bitrate <= 12_000_000 -> CastFit.RISKY
-        height <= 1080 && bitrate <= 8_000_000 -> CastFit.RISKY
+        height <= 1080 && width <= 2048 && bitrate <= 16_000_000 -> CastFit.SAFE
+        height <= 1080 && bitrate <= 16_000_000 -> CastFit.SAFE
+        height <= 1600 && width <= 3200 && bitrate <= 30_000_000 -> CastFit.RISKY
         else -> CastFit.UNSUPPORTED
     }
 }
 
 fun CastFit.badge(): String = when (this) {
     CastFit.SAFE -> "Castable"
-    CastFit.RISKY -> "May fail on some TVs"
+    CastFit.RISKY -> "Highest · may buffer"
     CastFit.UNSUPPORTED -> "Too heavy for Cast"
 }

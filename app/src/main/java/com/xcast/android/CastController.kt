@@ -1,5 +1,6 @@
 package com.xcast.android
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.google.android.gms.cast.MediaInfo
@@ -17,6 +18,8 @@ object CastController {
     private const val TAG = "XCastCast"
     const val AUDIO_TRACK_ID = 1L
     const val TEXT_TRACK_ID = 100L
+    @Volatile
+    private var loadSeq = 0
 
     fun load(
         session: CastSession,
@@ -25,6 +28,7 @@ object CastController {
         audioTrack: AudioTrackOption?,
         captionTrack: CaptionTrackOption?,
         startPositionMs: Long = 0L,
+        context: Context? = null,
         onSuccess: () -> Unit,
         onFailure: (String) -> Unit,
     ) {
@@ -49,54 +53,178 @@ object CastController {
             videoTrack.contentType
         }
 
-        Log.i(TAG, "Loading ${videoTrack.label} audio=${audioTrack?.label} cc=${captionTrack?.label} $url")
+        val seq = ++loadSeq
+        val queue = playbackQueue(video, videoTrack, url, contentType, context)
+        loadAttempt(
+            client = client,
+            video = video,
+            audioTrack = audioTrack,
+            captionTrack = captionTrack,
+            startPositionMs = startPositionMs,
+            queue = queue,
+            index = 0,
+            seq = seq,
+            onSuccess = onSuccess,
+            onFailure = onFailure,
+        )
+    }
+
+    private data class PlayUrl(
+        val url: String,
+        val contentType: String,
+        val label: String,
+        val useHls: Boolean,
+    )
+
+    private fun playbackQueue(
+        video: TweetVideo,
+        selected: VideoTrackOption,
+        selectedUrl: String,
+        selectedType: String,
+        context: Context?,
+    ): List<PlayUrl> {
+        val out = mutableListOf<PlayUrl>()
+        fun add(url: String, type: String, label: String, hls: Boolean, warmup: Boolean) {
+            val playUrl = if (!hls && context != null) {
+                CastMediaServer.lanUrl(context, url, warmup = warmup) ?: url
+            } else {
+                url
+            }
+            if (playUrl.startsWith("https://") && !SafeUrls.isAllowedHttps(playUrl)) return
+            if (out.any { it.url == playUrl }) return
+            out += PlayUrl(playUrl, type, label, hls)
+        }
+        val selectedIsHls = selectedType.contains("mpegurl")
+        add(stripQuery(selectedUrl), selectedType, selected.label, selectedIsHls, warmup = !selectedIsHls)
+        val fallbacks = video.videoTracks
+            .filter { it.contentType.contains("mp4") && it.fit != CastFit.UNSUPPORTED }
+            .filter { it.id != selected.id }
+            .sortedWith(compareByDescending<VideoTrackOption> { it.height }.thenByDescending { it.bitrate })
+        for (track in fallbacks) {
+            add(stripQuery(track.url), "video/mp4", track.label, false, warmup = false)
+        }
+        return out
+    }
+
+    private fun loadAttempt(
+        client: RemoteMediaClient,
+        video: TweetVideo,
+        audioTrack: AudioTrackOption?,
+        captionTrack: CaptionTrackOption?,
+        startPositionMs: Long,
+        queue: List<PlayUrl>,
+        index: Int,
+        seq: Int,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) {
+        if (seq != loadSeq) return
+        if (index >= queue.size) {
+            onFailure("TV could not play any stream for this post (tried ${queue.joinToString { it.label }}).")
+            return
+        }
+        val item = queue[index]
+        Log.i(TAG, "Loading ${item.label} ${item.contentType} ${item.url} at ${startPositionMs}ms")
 
         val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
-            putString(MediaMetadata.KEY_TITLE, video.title)
-            putString(MediaMetadata.KEY_SUBTITLE, video.subtitle)
-            video.thumbnailUrl?.let { addImage(WebImage(Uri.parse(it))) }
+            putString(MediaMetadata.KEY_TITLE, video.title.take(80))
+            video.subtitle.takeIf { it.isNotBlank() }?.let {
+                putString(MediaMetadata.KEY_SUBTITLE, it)
+            }
+            video.thumbnailUrl?.takeIf { SafeUrls.isAllowedHttps(it) }?.let { thumb ->
+                addImage(WebImage(Uri.parse(thumb)))
+            }
         }
 
-        val tracks = buildSidecarTracks(audioTrack, captionTrack, useHls)
-        val activeIds = activeIdsFor(audioTrack, captionTrack, useHls)
-
-        val mediaInfo = MediaInfo.Builder(url)
+        // Sidecar audio/VTT on the Default Media Receiver often yields
+        // "Invalid Request" and IDLE_REASON_ERROR. Load a bare media item first.
+        val mediaInfo = MediaInfo.Builder(item.url)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType(contentType)
+            .setContentType(item.contentType)
             .setMetadata(metadata)
             .apply {
-                video.durationMs?.let { setStreamDuration(it) }
-                if (tracks.isNotEmpty()) {
-                    setMediaTracks(tracks)
-                }
-                if (captionTrack != null && captionTrack.id != TweetVideoResolver.CAPTIONS_OFF) {
-                    setTextTrackStyle(TextTrackStyle())
-                }
+                val duration = video.durationMs
+                if (duration != null && duration > 0L) setStreamDuration(duration)
             }
             .build()
 
-        client.load(
-            MediaLoadRequestData.Builder()
-                .setMediaInfo(mediaInfo)
-                .setAutoplay(true)
-                .setPlaybackRate(1.0)
-                .setCurrentTime(startPositionMs.coerceAtLeast(0L))
-                .apply {
-                    if (activeIds.isNotEmpty()) {
-                        setActiveTrackIds(activeIds)
+        val durationHint = video.durationMs ?: 0L
+        val startOnLoad = startPositionMs in 1_000L until (durationHint - 8_000L).coerceAtLeast(1_000L)
+        val request = MediaLoadRequestData.Builder()
+            .setMediaInfo(mediaInfo)
+            .setAutoplay(true)
+            .apply { if (startOnLoad) setCurrentTime(startPositionMs) }
+            .build()
+
+        val playbackWatch = object : RemoteMediaClient.Callback() {
+            private var finished = false
+            var armed = false
+            override fun onStatusUpdated() {
+                if (finished || !armed || seq != loadSeq) return
+                val status = client.mediaStatus ?: return
+                when (status.playerState) {
+                    MediaStatus.PLAYER_STATE_PLAYING,
+                    MediaStatus.PLAYER_STATE_PAUSED,
+                    MediaStatus.PLAYER_STATE_BUFFERING,
+                    -> {
+                        finished = true
+                        client.unregisterCallback(this)
+                        Log.i(TAG, "Playing ${item.label}")
+                        maybeSeekToResume(client, video, startPositionMs)
+                        applyActiveTracks(client, audioTrack, captionTrack)
+                        onSuccess()
+                    }
+                    MediaStatus.PLAYER_STATE_IDLE -> {
+                        val reason = status.idleReason
+                        if (reason == MediaStatus.IDLE_REASON_ERROR ||
+                            reason == MediaStatus.IDLE_REASON_CANCELED
+                        ) {
+                            finished = true
+                            client.unregisterCallback(this)
+                            Log.w(TAG, "Idle error on ${item.label} reason=$reason")
+                            loadAttempt(
+                                client, video, audioTrack, captionTrack, startPositionMs,
+                                queue, index + 1, seq, onSuccess, onFailure,
+                            )
+                        }
                     }
                 }
-                .build(),
-        ).setResultCallback { result ->
-            if (result.status.isSuccess) {
-                Log.i(TAG, "Load ok")
-                applyActiveTracks(client, audioTrack, captionTrack)
-                onSuccess()
-            } else {
-                val msg = result.status.statusMessage ?: "status ${result.status.statusCode}"
-                Log.w(TAG, "Load failed: $msg")
-                onFailure("TV rejected ${videoTrack.label}: $msg")
             }
+        }
+        client.registerCallback(playbackWatch)
+
+        client.load(request).setResultCallback { result ->
+            if (seq != loadSeq) {
+                client.unregisterCallback(playbackWatch)
+                return@setResultCallback
+            }
+            if (!result.status.isSuccess) {
+                client.unregisterCallback(playbackWatch)
+                val msg = result.status.statusMessage ?: "status ${result.status.statusCode}"
+                Log.w(TAG, "Load failed for ${item.label}: $msg")
+                loadAttempt(
+                    client, video, audioTrack, captionTrack, startPositionMs,
+                    queue, index + 1, seq, onSuccess, onFailure,
+                )
+            } else {
+                Log.i(TAG, "Load command accepted for ${item.label}")
+                playbackWatch.armed = true
+                playbackWatch.onStatusUpdated()
+            }
+        }
+    }
+
+    private fun maybeSeekToResume(
+        client: RemoteMediaClient,
+        video: TweetVideo,
+        startPositionMs: Long,
+    ) {
+        if (startPositionMs < 1_000L) return
+        val duration = client.streamDuration.takeIf { it > 0 } ?: video.durationMs ?: 0L
+        if (startPositionMs >= (duration - 8_000L).coerceAtLeast(1_000L)) return
+        val pos = client.approximateStreamPosition
+        if (kotlin.math.abs(pos - startPositionMs) > 2_500L) {
+            seekTo(client, startPositionMs)
         }
     }
 
@@ -134,6 +262,7 @@ object CastController {
             ids += match?.id ?: TEXT_TRACK_ID
         }
 
+        if (ids.isEmpty()) return
         Log.i(TAG, "Active tracks $ids captionsOn=$captionsOn")
         client.setActiveMediaTracks(ids.toLongArray())
     }
@@ -184,6 +313,11 @@ object CastController {
             ids += TEXT_TRACK_ID
         }
         return ids.toLongArray()
+    }
+
+    private fun stripQuery(url: String): String {
+        val q = url.indexOf('?')
+        return if (q > 0) url.substring(0, q) else url
     }
 
     fun togglePlayPause(client: RemoteMediaClient) {

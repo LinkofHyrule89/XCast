@@ -43,6 +43,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<UiState> = _uiState
 
     private var pendingCast = false
+    private var silentRecast = false
 
     fun resolve(raw: String) {
         val text = raw.trim()
@@ -75,15 +76,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val video = resolver.resolve(text)
                 val defaultVideo = defaultVideoTrack(video)
+                defaultVideo?.url?.let { CastMediaServer.warmup(it) }
                 store.upsertRecent(video)
                 val resume = store.resumePosition(video.statusId) ?: 0L
                 _uiState.value = UiState(
                     loading = false,
-                    message = "Pick a Castable resolution, then tap Cast to TV.",
+                    message = "Ready — ${defaultVideo?.label ?: "video"} selected. Tap Cast to TV.",
                     video = video,
                     selectedVideoId = defaultVideo?.id,
                     selectedAudioId = TweetVideoResolver.AUDIO_MUXED,
-                    selectedCaptionId = defaultCaptionId(video),
+                    selectedCaptionId = TweetVideoResolver.CAPTIONS_OFF,
                     castableOnly = store.castableOnly,
                     recents = store.recents(),
                     error = LookupError.NONE,
@@ -119,7 +121,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(error = LookupError.REJECTED, message = message) }
     }
 
-    fun selectVideo(id: String) {
+    fun selectVideo(id: String): Boolean {
+        if (_uiState.value.selectedVideoId == id) return false
         _uiState.update { state ->
             val track = state.video?.videoTracks?.firstOrNull { it.id == id }
             val audioId = if (track?.muxedAudio == false) {
@@ -135,6 +138,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             state.copy(selectedVideoId = id, selectedAudioId = audioId)
         }
+        selectedVideo()?.url?.let { CastMediaServer.warmup(it) }
+        return true
     }
 
     fun selectCaption(id: String) {
@@ -219,14 +224,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(resumeAtMs = 0L) }
     }
 
-    fun markPendingCast() {
+    fun markPendingCast(silent: Boolean = false) {
         pendingCast = true
+        silentRecast = silent
     }
 
     fun consumePendingCast(): Boolean {
         if (!pendingCast) return false
         pendingCast = false
         return true
+    }
+
+    fun consumeSilentRecast(): Boolean {
+        val silent = silentRecast
+        silentRecast = false
+        return silent
     }
 
     private fun defaultVideoTrack(video: TweetVideo): VideoTrackOption? {
@@ -236,14 +248,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             video.videoTracks
         }
-        if (preferred == 0) {
-            visible.firstOrNull { it.id == TweetVideoResolver.VIDEO_HLS }?.let { return it }
-        }
-        visible.filter { it.contentType.contains("mp4") && it.height == preferred }.maxByOrNull { it.bitrate }?.let { return it }
         val mp4 = visible.filter { it.contentType.contains("mp4") }
-        return mp4.filter { it.fit == CastFit.SAFE }.maxByOrNull { it.height }
-            ?: mp4.filter { it.fit != CastFit.UNSUPPORTED }.maxByOrNull { it.height }
-            ?: mp4.maxByOrNull { it.height }
+        val quality = compareBy<VideoTrackOption> { it.height }.thenBy { it.bitrate }
+        val bestSafe = mp4.filter { it.fit == CastFit.SAFE }.maxWithOrNull(quality)
+        val preferredTrack = mp4.filter { it.height == preferred }.maxByOrNull { it.bitrate }
+        // Honor a saved pick only when it is at least as sharp as the
+        // best Cast-safe encode (e.g. user chose ~3K). Never keep an old
+        // 720p default when 1080p is available.
+        if (preferred > 0 && preferredTrack != null &&
+            preferredTrack.height >= (bestSafe?.height ?: 0)
+        ) {
+            return preferredTrack
+        }
+        return bestSafe
+            ?: mp4.filter { it.fit != CastFit.UNSUPPORTED }.maxWithOrNull(quality)
+            ?: mp4.maxWithOrNull(quality)
             ?: visible.firstOrNull()
     }
 
