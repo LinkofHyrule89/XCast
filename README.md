@@ -34,6 +34,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 - **Resume** from last position; **History** tab to re-open, pin, delete, or clear posts
 - Thumbnail, duration, **Open in X**, on-phone **MP4 preview** before Cast
 - Material You dynamic color, Cast intro overlay, keep-screen-on while casting
+- **Auto-update** from GitHub Releases (check on launch, download, and install)
 
 ## Install
 
@@ -70,8 +71,8 @@ Or open the folder in Android Studio.
 GitHub Actions builds the APK on every push to `main` and publishes it when you push a tag:
 
 ```bash
-git tag v1.2.1
-git push origin v1.2.1
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 ## How it works

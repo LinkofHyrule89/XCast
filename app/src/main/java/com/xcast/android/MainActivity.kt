@@ -50,7 +50,10 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
 import androidx.mediarouter.app.MediaRouteActionProvider
 import com.xcast.android.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -65,6 +68,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var nowPlayingBehavior: BottomSheetBehavior<LinearLayout>
     private var navInset = 0
     private var userSeeking = false
+    private var updateBusy = false
+    private val prefs by lazy { PrefsStore(this) }
     private val speeds = listOf(0.75 to "0.75×", 1.0 to "1×", 1.25 to "1.25×", 1.5 to "1.5×", 2.0 to "2×")
 
     private val progressListener = RemoteMediaClient.ProgressListener { position, duration ->
@@ -202,6 +207,7 @@ class MainActivity : AppCompatActivity() {
             viewModel.setCastableOnly(checked)
         }
         binding.historyClearButton.setOnClickListener { confirmClearHistory() }
+        binding.checkUpdatesButton.setOnClickListener { checkForUpdates(userPrompt = true) }
         binding.playbackSettingsToggle.setOnClickListener {
             setPlaybackSettingsOpen(!binding.playbackSettingsPanel.isVisible, animate = true)
         }
@@ -216,6 +222,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         handleIncoming(intent)
+        maybeAutoCheckUpdates()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -228,6 +235,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         castContext?.sessionManager?.addSessionManagerListener(sessionListener, CastSession::class.java)
         attachRemote()
+        retryPendingUpdate()
     }
 
     override fun onPause() {
@@ -716,6 +724,128 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun maybeAutoCheckUpdates() {
+        val now = System.currentTimeMillis()
+        if (now - prefs.lastAppCheckAt < 24 * 60 * 60 * 1000L) return
+        checkForUpdates(userPrompt = false)
+    }
+
+    private fun checkForUpdates(userPrompt: Boolean) {
+        if (updateBusy) return
+        updateBusy = true
+        lifecycleScope.launch {
+            try {
+                val release = withContext(Dispatchers.IO) { AppUpdate.latest() }
+                prefs.lastAppCheckAt = System.currentTimeMillis()
+                if (!AppUpdate.isNewer(release.tag)) {
+                    if (userPrompt) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            getString(R.string.update_up_to_date, BuildConfig.VERSION_NAME),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    return@launch
+                }
+                if (!userPrompt && prefs.dismissedUpdateTag == release.tag) return@launch
+                promptUpdate(release)
+            } catch (e: Exception) {
+                if (userPrompt) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.update_check_failed, e.message ?: "error"),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            } finally {
+                updateBusy = false
+            }
+        }
+    }
+
+    private fun promptUpdate(release: AppUpdate.Release) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.update_available_title, release.version))
+            .setMessage(release.notes.take(2_000))
+            .setPositiveButton(R.string.update_now) { _, _ -> downloadAndInstall(release) }
+            .setNegativeButton(R.string.update_later) { _, _ ->
+                prefs.dismissedUpdateTag = release.tag
+            }
+            .show()
+    }
+
+    private fun downloadAndInstall(release: AppUpdate.Release) {
+        if (!AppUpdate.canInstall(this)) {
+            prefs.pendingUpdatePath = release.apkUrl
+            startActivity(AppUpdate.installPermissionIntent(this))
+            Toast.makeText(this, R.string.update_permission_needed, Toast.LENGTH_LONG).show()
+            return
+        }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.update_available_title, release.version))
+            .setMessage(getString(R.string.update_downloading, release.version, 0))
+            .setCancelable(false)
+            .show()
+        lifecycleScope.launch {
+            try {
+                val file = AppUpdate.apkFile(this@MainActivity)
+                withContext(Dispatchers.IO) {
+                    AppUpdate.download(release.apkUrl, file) { progress ->
+                        runOnUiThread {
+                            if (dialog.isShowing) {
+                                dialog.setMessage(
+                                    getString(R.string.update_downloading, release.version, progress),
+                                )
+                            }
+                        }
+                    }
+                }
+                prefs.pendingUpdatePath = file.absolutePath
+                if (dialog.isShowing) dialog.setMessage(getString(R.string.update_installing))
+                AppUpdate.install(this@MainActivity, file)
+                dialog.dismiss()
+            } catch (e: Exception) {
+                dialog.dismiss()
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.update_download_failed, e.message ?: "error"),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun retryPendingUpdate() {
+        val pending = prefs.pendingUpdatePath
+        if (pending.isBlank() || !AppUpdate.canInstall(this)) return
+        if (pending.startsWith("https://")) {
+            prefs.pendingUpdatePath = ""
+            downloadAndInstall(
+                AppUpdate.Release(
+                    tag = "",
+                    version = BuildConfig.VERSION_NAME,
+                    notes = "",
+                    apkUrl = pending,
+                    pageUrl = "",
+                    sizeBytes = 0L,
+                ),
+            )
+            return
+        }
+        val file = File(pending)
+        if (file.exists()) {
+            try {
+                AppUpdate.install(this, file)
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this,
+                    getString(R.string.update_download_failed, e.message ?: "error"),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
     }
 
     private fun confirmClearHistory() {

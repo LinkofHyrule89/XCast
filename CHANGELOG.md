@@ -2,6 +2,15 @@
 
 All notable changes to XCast are documented here.
 
+## [1.3.0] — 2026-08-22
+
+In-app updates from GitHub Releases, same idea as Neko: check `/releases/latest`, then download and install the APK.
+
+- Checks for a newer GitHub release once a day when the app opens.
+- **Check for updates** on the Cast tab always talks to GitHub.
+- Downloads `XCast.apk` and opens the system installer (PackageInstaller on Android 12+, with a FileProvider fallback).
+- You still confirm “Allow from this source” the first time.
+
 ## [1.2.1] — 2026-08-22
 
 History management and an explicit unofficial disclaimer.
@@ -38,6 +47,7 @@ Volume, mute, speed, and chapter skip on the TV remote. Recents and last-positio
 
 Initial release. Share an X video post to Chromecast with Cast-safe stream picking, captions, chapters, and in-app play/pause/scrub.
 
+[1.3.0]: https://github.com/LinkofHyrule89/XCast/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/LinkofHyrule89/XCast/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/LinkofHyrule89/XCast/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LinkofHyrule89/XCast/compare/v1.0.0...v1.1.0

@@ -26,6 +26,18 @@ class PrefsStore(context: Context) {
         get() = prefs.getInt(HEIGHT_BAND, 0)
         set(value) { prefs.edit().putInt(HEIGHT_BAND, value).apply() }
 
+    var lastAppCheckAt: Long
+        get() = prefs.getLong(LAST_APP_CHECK, 0L)
+        set(value) { prefs.edit().putLong(LAST_APP_CHECK, value).apply() }
+
+    var dismissedUpdateTag: String
+        get() = prefs.getString(DISMISSED_UPDATE, "").orEmpty()
+        set(value) { prefs.edit().putString(DISMISSED_UPDATE, value).apply() }
+
+    var pendingUpdatePath: String
+        get() = prefs.getString(PENDING_UPDATE, "").orEmpty()
+        set(value) { prefs.edit().putString(PENDING_UPDATE, value).apply() }
+
     fun recents(): List<RecentItem> {
         val raw = prefs.getString(RECENTS, "[]") ?: "[]"
         val array = JSONArray(raw)
@@ -143,6 +155,9 @@ class PrefsStore(context: Context) {
     companion object {
         private const val CASTABLE_ONLY = "castable_only"
         private const val HEIGHT_BAND = "height_band"
+        private const val LAST_APP_CHECK = "last_app_check"
+        private const val DISMISSED_UPDATE = "dismissed_update"
+        private const val PENDING_UPDATE = "pending_update"
         private const val RECENTS = "recents"
         private const val RESUME = "resume"
         private const val MAX_RECENTS = 20
