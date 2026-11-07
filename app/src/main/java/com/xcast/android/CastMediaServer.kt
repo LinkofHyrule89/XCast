@@ -10,6 +10,7 @@ import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -19,6 +20,8 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * Serves Twitter MP4s to the Cast receiver over HTTP/1.1 on the LAN.
@@ -50,6 +53,12 @@ object CastMediaServer {
     @Volatile
     private var socket: ServerSocket? = null
 
+    private val bufferLock = ReentrantLock()
+    @Volatile
+    private var pauseBuffer: Mp4PauseBuffer? = null
+    @Volatile
+    private var pauseListener: ((PauseBufferSnapshot) -> Unit)? = null
+
     private val hintsLock = Any()
     private val hints = object : LinkedHashMap<String, FileHint>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FileHint>?) = size > 4
@@ -65,7 +74,8 @@ object CastMediaServer {
     )
 
     @Synchronized
-    fun ensureStarted() {
+    fun ensureStarted(context: Context? = null) {
+        if (context != null) pauseBuffer(context)
         if (socket != null && !socket!!.isClosed) return
         val server = ServerSocket()
         server.reuseAddress = true
@@ -114,6 +124,85 @@ object CastMediaServer {
                 synchronized(hintsLock) { warming -= source }
             }
         }, "xcast-warmup").apply { isDaemon = true; start() }
+    }
+
+    fun setPauseBufferListener(listener: ((PauseBufferSnapshot) -> Unit)?) {
+        pauseListener = listener
+        pauseBuffer?.setListener(listener)
+    }
+
+    fun pauseBufferSnapshot(): PauseBufferSnapshot {
+        return pauseBuffer?.snapshot() ?: PauseBufferSnapshot(PauseBufferReason.HIDDEN, 0L, 0L)
+    }
+
+    fun onCastPaused(context: Context, contentId: String?) {
+        dispatchCast(context, contentId, paused = true)
+    }
+
+    fun onCastPlaying(context: Context, contentId: String?) {
+        dispatchCast(context, contentId, paused = false)
+    }
+
+    fun onCastStopped() {
+        pauseBuffer?.discard()
+    }
+
+    private fun dispatchCast(context: Context, contentId: String?, paused: Boolean) {
+        if (contentId.isNullOrBlank()) return
+        val source = proxiedMp4Source(contentId)
+        if (source == null) {
+            pauseBuffer?.discard()
+            return
+        }
+        val buffer = pauseBuffer(context)
+        if (paused) buffer.onPaused(source) else buffer.onPlaying(source)
+    }
+
+    internal fun proxiedMp4Source(contentId: String?): String? {
+        if (contentId.isNullOrBlank() || !contentId.contains("/cast?u=")) return null
+        val encoded = contentId.substringAfter("u=", "").substringBefore("&")
+        if (encoded.isBlank()) return null
+        val source = try {
+            stripQuery(URLDecoder.decode(encoded, StandardCharsets.UTF_8.name()))
+        } catch (_: Exception) {
+            return null
+        }
+        if (!SafeUrls.isAllowedHttps(source) || source.contains(".m3u8")) return null
+        return source
+    }
+
+    private fun pauseBuffer(context: Context): Mp4PauseBuffer {
+        pauseBuffer?.let { return it }
+        return bufferLock.withLock {
+            pauseBuffer?.let { return it }
+            val created = Mp4PauseBuffer(
+                directory = File(context.cacheDir, "pause-buffer"),
+                upstream = OkHttpPauseUpstream(client, UA),
+            )
+            created.setListener { snap ->
+                Log.i(TAG, "pause-buffer ${snap.reason} saved=${snap.savedBytes} total=${snap.totalBytes}")
+                pauseListener?.invoke(snap)
+            }
+            pauseBuffer = created
+            created
+        }
+    }
+
+    private fun serveFromPauseCache(
+        sock: Socket,
+        source: String,
+        rangeHeader: String?,
+        headOnly: Boolean,
+    ): Boolean {
+        val opened = pauseBuffer?.openRange(source, rangeHeader) ?: return false
+        opened.use { hit ->
+            val out = sock.getOutputStream()
+            out.write(cachedHttpHead(hit.status, hit.contentRange, hit.length).toByteArray(StandardCharsets.US_ASCII))
+            if (!headOnly) hit.writeTo(out)
+            out.flush()
+            Log.i(TAG, "pause-cache hit status=${hit.status} bytes=${hit.length}")
+        }
+        return true
     }
 
     @Suppress("DEPRECATION")
@@ -200,6 +289,7 @@ object CastMediaServer {
                 ?.substringAfter(":")
                 ?.trim()
             sock.soTimeout = 0
+            if (serveFromPauseCache(sock, source, rangeHeader, method == "HEAD")) return
             if (serveFromHint(sock, source, rangeHeader, method == "HEAD")) return
             proxyOrigin(sock, source, rangeHeader, method == "HEAD")
         } catch (e: Exception) {
@@ -219,7 +309,7 @@ object CastMediaServer {
         headOnly: Boolean,
     ): Boolean {
         val hint = synchronized(hintsLock) { hints[source] } ?: return false
-        val spec = parseRange(rangeHeader, hint.contentLength) ?: return false
+        val spec = HttpByteRanges.parse(rangeHeader, hint.contentLength) ?: return false
         val data = sliceHint(hint, spec) ?: return false
         val end = spec.start + data.size - 1
         val out = sock.getOutputStream()
@@ -305,31 +395,11 @@ object CastMediaServer {
     }
 
     private fun contentLengthOf(resp: okhttp3.Response): Long? {
-        resp.header("Content-Range")?.let { range ->
-            val total = range.substringAfter("/", missingDelimiterValue = "").toLongOrNull()
-            if (total != null && total > 0L) return total
-        }
-        if (resp.code == 200) {
-            resp.header("Content-Length")?.toLongOrNull()?.let { if (it > 0L) return it }
-        }
-        return null
-    }
-
-    private data class ByteRange(val start: Long, val endInclusive: Long)
-
-    private fun parseRange(header: String?, contentLength: Long): ByteRange? {
-        if (header.isNullOrBlank() || contentLength <= 0L) return null
-        val spec = header.removePrefix("bytes=").substringBefore(",").trim()
-        if (spec.startsWith("-")) {
-            val suffix = spec.drop(1).toLongOrNull() ?: return null
-            val start = (contentLength - suffix).coerceAtLeast(0L)
-            return ByteRange(start, contentLength - 1)
-        }
-        val start = spec.substringBefore("-").toLongOrNull() ?: return null
-        val endPart = spec.substringAfter("-", "")
-        val end = endPart.toLongOrNull() ?: (contentLength - 1)
-        if (start < 0L || start >= contentLength || end < start) return null
-        return ByteRange(start, end.coerceAtMost(contentLength - 1))
+        return responseTotalLength(
+            resp.code,
+            resp.header("Content-Range"),
+            resp.header("Content-Length")?.toLongOrNull() ?: -1L,
+        )
     }
 
     private fun sliceHint(hint: FileHint, spec: ByteRange): ByteArray? {

@@ -530,7 +530,8 @@
         <LinearLayout
             android:id="@+id/miniPlayer"
             android:layout_width="match_parent"
-            android:layout_height="64dp"
+            android:layout_height="wrap_content"
+            android:minHeight="64dp"
             android:background="?attr/colorSurfaceContainerHigh"
             android:clickable="true"
             android:focusable="true"
@@ -540,8 +541,7 @@
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
+                android:layout_height="62dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="12dp"
@@ -598,6 +598,20 @@
                 android:progress="0"
                 app:trackCornerRadius="0dp"
                 app:trackThickness="2dp" />
+
+            <TextView
+                android:id="@+id/miniBufferStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:paddingStart="12dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="6dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:visibility="gone" />
         </LinearLayout>
 
         <com.google.android.material.bottomnavigation.BottomNavigationView
@@ -676,6 +690,16 @@
             android:layout_marginHorizontal="24dp"
             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
             android:textColor="?attr/colorOnSurfaceVariant" />
+
+        <TextView
+            android:id="@+id/npBufferStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="24dp"
+            android:layout_marginTop="4dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:visibility="gone" />
 
         <LinearLayout
             android:layout_width="match_parent"

@@ -25,6 +25,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 - **Share to XCast** from the X app (`text/plain` share and `x.com` / `twitter.com` links)
 - Resolves a direct H.264 + AAC stream (no X API key)
 - **LAN proxy** so Google TV / Sony Bravia can play Twitter MP4s (the TV fetches from the phone, not `video.twimg.com`)
+- **Pause save** for a proxied MP4: while Cast is paused, the phone keeps downloading that file (one video, size-capped). Later TV requests can use the saved bytes. The status line is about the phone, not the TV buffer. HLS is unchanged.
 - Defaults to the highest **Cast-safe** MP4, typically **1080p** when X publishes it
 - Audio track and **closed captions / WebVTT** when X publishes them
 - **Chapters** from timestamp lines in the post (`0:00 Intro`)

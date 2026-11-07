@@ -18,6 +18,13 @@
     <string name="remote_title">TV remote</string>
     <string name="play">Play</string>
     <string name="pause">Pause</string>
+    <string name="pause_buffer_saving">Saving this video on your phone</string>
+    <string name="pause_buffer_partial">Part of this video is saved on your phone</string>
+    <string name="pause_buffer_saved">Saved on your phone for this cast</string>
+    <string name="pause_buffer_capped">Part of this video is saved on your phone. The rest is over the save limit.</string>
+    <string name="pause_buffer_low_space">Phone save stopped. Not enough free space.</string>
+    <string name="pause_buffer_rejected">Phone save stopped. The video link was rejected.</string>
+    <string name="pause_buffer_stopped">Phone save stopped</string>
     <string name="skip_back">−10s</string>
     <string name="skip_forward">+10s</string>
     <string name="stop_cast">Stop</string>

@@ -11,8 +11,8 @@ android {
         applicationId = "com.xcast.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.3.0"
+        versionCode = 6
+        versionName = "1.4.0"
     }
 
     buildTypes {
@@ -64,4 +64,5 @@ dependencies {
     implementation("io.coil-kt:coil:2.7.0")
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    testImplementation("junit:junit:4.13.2")
 }

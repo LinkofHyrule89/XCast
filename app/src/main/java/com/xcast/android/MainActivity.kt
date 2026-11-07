@@ -34,6 +34,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import coil.load
+import com.google.android.gms.cast.MediaStatus
 import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastState
@@ -88,6 +89,7 @@ class MainActivity : AppCompatActivity() {
             updatePlayPauseIcons()
             updateVolumeUi()
             updateRemoteTab()
+            syncPauseBuffer()
         }
     }
 
@@ -103,6 +105,8 @@ class MainActivity : AppCompatActivity() {
         }
         override fun onSessionEnded(session: CastSession, error: Int) {
             updateConnectedDevice()
+            CastMediaServer.onCastStopped()
+            renderPauseBuffer(CastMediaServer.pauseBufferSnapshot())
             showMiniPlayer(false)
             collapseNowPlaying()
             setKeepAwake(false)
@@ -125,6 +129,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+        CastMediaServer.setPauseBufferListener { snap ->
+            runOnUiThread { renderPauseBuffer(snap) }
+        }
         setupNowPlaying()
         setupBottomNav()
         savedInstanceState?.getInt(STATE_TAB, R.id.tab_cast)?.let { id ->
@@ -256,6 +263,52 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         releaseLocalPlayer()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        CastMediaServer.setPauseBufferListener(null)
+        super.onDestroy()
+    }
+
+    private fun syncPauseBuffer() {
+        val client = currentClient() ?: return
+        val url = client.mediaInfo?.contentId
+        when (client.playerState) {
+            MediaStatus.PLAYER_STATE_PAUSED -> CastMediaServer.onCastPaused(this, url)
+            MediaStatus.PLAYER_STATE_PLAYING,
+            MediaStatus.PLAYER_STATE_BUFFERING,
+            -> CastMediaServer.onCastPlaying(this, url)
+            MediaStatus.PLAYER_STATE_IDLE -> {
+                val reason = client.mediaStatus?.idleReason ?: return
+                if (reason == MediaStatus.IDLE_REASON_CANCELED ||
+                    reason == MediaStatus.IDLE_REASON_FINISHED ||
+                    reason == MediaStatus.IDLE_REASON_ERROR ||
+                    reason == MediaStatus.IDLE_REASON_INTERRUPTED
+                ) {
+                    CastMediaServer.onCastStopped()
+                }
+            }
+        }
+        renderPauseBuffer(CastMediaServer.pauseBufferSnapshot())
+    }
+
+    private fun renderPauseBuffer(snap: PauseBufferSnapshot) {
+        val text = when (snap.reason) {
+            PauseBufferReason.HIDDEN -> ""
+            PauseBufferReason.SAVING -> getString(R.string.pause_buffer_saving)
+            PauseBufferReason.PARTIAL -> getString(R.string.pause_buffer_partial)
+            PauseBufferReason.SAVED -> getString(R.string.pause_buffer_saved)
+            PauseBufferReason.CAPPED -> getString(R.string.pause_buffer_capped)
+            PauseBufferReason.LOW_SPACE -> getString(R.string.pause_buffer_low_space)
+            PauseBufferReason.REJECTED -> getString(R.string.pause_buffer_rejected)
+            PauseBufferReason.STOPPED -> getString(R.string.pause_buffer_stopped)
+        }
+        val show = text.isNotEmpty()
+        binding.npBufferStatus.text = text
+        binding.npBufferStatus.isVisible = show
+        binding.miniBufferStatus.text = text
+        binding.miniBufferStatus.isVisible = show
+        binding.npBufferStatus.post { padTabsForChrome() }
     }
 
     private fun handleIncoming(intent: Intent?) {
@@ -476,6 +529,7 @@ class MainActivity : AppCompatActivity() {
         showMiniPlayer(isMediaActive())
         updateVolumeUi()
         updateRemoteTab()
+        syncPauseBuffer()
         highlightCurrentChapter(client.approximateStreamPosition)
         val duration = client.streamDuration.takeIf { it > 0 } ?: viewModel.uiState.value.video?.durationMs ?: 0L
         updatePlaybackChrome(client.approximateStreamPosition, duration)
